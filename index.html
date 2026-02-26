@@ -3,180 +3,123 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Room Video</title>
+    <title>ADLX Video - Final Fix</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
-        :root { --bg: #0f172a; --accent: #3b82f6; --danger: #ef4444; --text: #f8fafc; }
-        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
-        
-        /* Setup Screen */
-        .setup { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; text-align: center; padding: 20px; }
-        input { padding: 15px; border-radius: 10px; border: 2px solid #334155; width: 100%; max-width: 300px; margin-bottom: 15px; background: #1e293b; color: white; font-size: 16px; }
-        
-        /* Call Screen */
-        #video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; padding: 20px; height: 70vh; }
-        .video-wrapper { position: relative; background: #000; border-radius: 15px; overflow: hidden; aspect-ratio: 16/9; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
+        :root { --bg: #0b0f1a; --accent: #2563eb; --danger: #dc2626; }
+        body { margin: 0; font-family: sans-serif; background: var(--bg); color: white; }
+        .setup { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; padding: 20px; }
+        .video-wrapper { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 16/9; }
         video { width: 100%; height: 100%; object-fit: cover; }
-        
-        /* Badges & Status */
-        .badge { position: absolute; top: 10px; right: 10px; background: var(--danger); padding: 4px 10px; border-radius: 5px; font-size: 11px; display: none; font-weight: bold; }
-        .badge.active { display: block; }
-        .name-tag { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.6); padding: 4px 10px; border-radius: 5px; font-size: 12px; }
-
-        /* Controls */
-        .controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; background: rgba(15, 23, 42, 0.9); padding: 15px 25px; border-radius: 100px; border: 1px solid #334155; backdrop-filter: blur(10px); z-index: 100; }
-        button { padding: 12px 20px; border-radius: 50px; border: none; cursor: pointer; background: var(--accent); color: white; font-weight: 600; transition: 0.3s; }
-        button.off { background: var(--danger); }
-        
-        /* Debug Log */
-        #debug-log { position: fixed; top: 10px; left: 10px; font-size: 10px; color: #94a3b8; max-width: 200px; pointer-events: none; }
-        .hidden { display: none !important; }
+        .controls { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 50px; }
+        button { padding: 10px 20px; border-radius: 20px; border: none; cursor: pointer; background: var(--accent); color: white; font-weight: bold; }
+        input { padding: 15px; border-radius: 10px; border: none; width: 250px; margin-bottom: 10px; background: #1e293b; color: white; text-align: center; }
+        .hidden { display: none; }
+        #status-log { position: fixed; top: 10px; width: 100%; text-align: center; font-size: 12px; color: #60a5fa; }
     </style>
 </head>
 <body>
 
-<div id="debug-log">Log: Starting...</div>
+<div id="status-log">Ready...</div>
 
 <div id="setup-screen" class="setup">
-    <h1 style="margin-bottom: 10px;">ADLX Video</h1>
-    <p style="opacity: 0.7; margin-bottom: 30px;">Enter a room name to start</p>
-    <input type="text" id="room-id" placeholder="Room Name (e.g. MyGroup1)">
-    <button onclick="startApp()" style="width: 100%; max-width: 330px; padding: 18px;">Join Room</button>
+    <h2>Enter Room Code</h2>
+    <input type="text" id="room-input" placeholder="e.g. MyRoom123">
+    <button onclick="joinRoom()">JOIN CALL</button>
 </div>
 
 <div id="call-screen" class="hidden">
-    <div style="padding: 10px; text-align: center; background: #1e293b; font-size: 14px;">
-        Connected to: <b id="room-display"></b>
-    </div>
     <div id="video-grid">
-        <div class="video-wrapper" id="local-wrapper">
+        <div class="video-wrapper">
             <video id="localVideo" autoplay playsinline muted></video>
-            <div class="name-tag">You (Local)</div>
-            <div class="status-icons">
-                <span id="local-mic-badge" class="badge">MUTED</span>
-                <span id="local-cam-badge" class="badge">CAM OFF</span>
-            </div>
         </div>
     </div>
-
     <div class="controls">
-        <button id="mic-btn" onclick="toggleAudio()">🎤 Mic</button>
-        <button id="cam-btn" onclick="toggleVideo()">📷 Cam</button>
-        <button style="background:var(--danger)" onclick="location.reload()">End</button>
+        <button onclick="resync()">🔄 RE-SYNC</button>
+        <button style="background:var(--danger)" onclick="location.reload()">LEAVE</button>
     </div>
 </div>
 
 <script>
-    // Config for Firewall Punching (STUN)
-    const pcConfig = { config: {'iceServers': [
-        { 'urls': 'stun:stun.l.google.com:19302' },
-        { 'urls': 'stun:stun1.l.google.com:19302' }
-    ]}};
-    
-    // Signaling Database
-    const gun = Gun(['https://gun-manhattan.herokuapp.com/gun']);
-    const peer = new Peer(undefined, pcConfig);
-    
-    let myStream, myID, currentRoom;
+    const log = (msg) => document.getElementById('status-log').innerText = msg;
+    let myStream, peer, roomName;
 
-    function log(msg) {
-        const d = document.getElementById('debug-log');
-        d.innerText = msg;
-        console.log(msg);
-    }
-
-    async function startApp() {
-        const roomCode = document.getElementById('room-id').value.trim().toLowerCase();
-        if (!roomCode) return alert("Please enter a room name");
+    async function joinRoom() {
+        roomName = document.getElementById('room-input').value.trim().toLowerCase();
+        if (!roomName) return alert("Enter a code!");
 
         document.getElementById('setup-screen').classList.add('hidden');
         document.getElementById('call-screen').classList.remove('hidden');
-        document.getElementById('room-display').innerText = roomCode;
 
         try {
             myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             document.getElementById('localVideo').srcObject = myStream;
-            log("Camera access granted.");
+            
+            // We create a predictable ID: roomname + "1" or "2"
+            // For now, let's try a more robust random approach
+            initPeer();
         } catch (e) {
-            log("Camera Error: " + e.message);
-            alert("Please allow camera access!");
+            alert("Camera needed!");
         }
+    }
+
+    function initPeer() {
+        // We use a STUN server to bypass Wi-Fi firewalls
+        peer = new Peer(undefined, {
+            config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] }
+        });
 
         peer.on('open', (id) => {
-            myID = id;
-            log("My ID: " + id);
-            currentRoom = gun.get('adlx-vfinal').get(roomCode);
-            
-            // Periodically broadcast presence so late-joiners see us
-            setInterval(() => {
-                currentRoom.get(myID).put({ mic: myStream.getAudioTracks()[0].enabled, cam: myStream.getVideoTracks()[0].enabled, time: Date.now() });
-            }, 3000);
-
-            // Listen for others in the room
-            currentRoom.map().on((data, peerID) => {
-                if (peerID !== myID && data) {
-                    if (!document.getElementById(peerID)) {
-                        log("New user detected! Calling...");
-                        const call = peer.call(peerID, myStream);
-                        addRemoteVideo(call);
-                    } else {
-                        updateRemoteStatus(peerID, data);
-                    }
-                }
-            });
+            log("Connected. Waiting for partner...");
+            // Save our ID to a public "waiting room"
+            const signalingServer = "https://gun-manhattan.herokuapp.com/gun"; // Fallback discovery
+            broadcastPresence(id);
         });
 
-        peer.on('call', call => {
-            log("Receiving call...");
+        peer.on('call', (call) => {
+            log("Partner joined! Connecting...");
             call.answer(myStream);
-            addRemoteVideo(call);
+            handleCall(call);
         });
-
-        peer.on('error', err => log("PeerJS Error: " + err.type));
     }
 
-    function addRemoteVideo(call) {
-        if (document.getElementById(call.peer)) return;
+    // This is the "Genius" trick: We use a public list to find the other person's ID
+    function broadcastPresence(myID) {
+        const roomKey = 'adlx-' + roomName;
+        // We use a simple fetch-based discovery or the GunDB again but cleaner
+        const discovery = new Gun(['https://gun-manhattan.herokuapp.com/gun']).get(roomKey);
         
-        const wrapper = document.createElement('div');
-        wrapper.className = 'video-wrapper';
-        wrapper.id = call.peer;
-        wrapper.innerHTML = `
-            <video autoplay playsinline></video>
-            <div class="name-tag">Participant</div>
-            <div class="status-icons">
-                <span id="mic-${call.peer}" class="badge">MUTED</span>
-                <span id="cam-${call.peer}" class="badge">CAM OFF</span>
-            </div>
-        `;
+        discovery.set(myID);
+        
+        discovery.map().on((otherID) => {
+            if (otherID !== myID && !document.getElementById(otherID)) {
+                log("Calling partner...");
+                const call = peer.call(otherID, myStream);
+                handleCall(call);
+            }
+        });
+    }
 
-        call.on('stream', remoteStream => {
-            log("Stream received!");
-            wrapper.querySelector('video').srcObject = remoteStream;
+    function handleCall(call) {
+        const video = document.createElement('video');
+        video.id = call.peer;
+        call.on('stream', (remoteStream) => {
+            if (document.getElementById(call.peer)) return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'video-wrapper';
+            video.srcObject = remoteStream;
+            video.autoplay = true;
+            video.playsInline = true;
+            wrapper.append(video);
             document.getElementById('video-grid').append(wrapper);
+            log("Connected!");
         });
-        
-        call.on('close', () => wrapper.remove());
     }
 
-    function updateRemoteStatus(peerID, data) {
-        const m = document.getElementById(`mic-${peerID}`);
-        const c = document.getElementById(`cam-${peerID}`);
-        if(m) m.classList.toggle('active', data.mic === false);
-        if(c) c.classList.toggle('active', data.cam === false);
-    }
-
-    function toggleAudio() {
-        const enabled = myStream.getAudioTracks()[0].enabled = !myStream.getAudioTracks()[0].enabled;
-        document.getElementById('mic-btn').classList.toggle('off', !enabled);
-        document.getElementById('local-mic-badge').classList.toggle('active', !enabled);
-    }
-
-    function toggleVideo() {
-        const enabled = myStream.getVideoTracks()[0].enabled = !myStream.getVideoTracks()[0].enabled;
-        document.getElementById('cam-btn').classList.toggle('off', !enabled);
-        document.getElementById('local-cam-badge').classList.toggle('active', !enabled);
+    function resync() {
+        log("Re-syncing...");
+        location.reload();
     }
 </script>
 </body>

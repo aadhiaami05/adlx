@@ -3,123 +3,102 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ADLX Video - Final Fix</title>
+    <title>ADLX FIXED</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        :root { --bg: #0b0f1a; --accent: #2563eb; --danger: #dc2626; }
-        body { margin: 0; font-family: sans-serif; background: var(--bg); color: white; }
-        .setup { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-        #video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; padding: 20px; }
-        .video-wrapper { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 16/9; }
+        body { margin: 0; font-family: sans-serif; background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 95%; height: 70vh; }
+        .box { position: relative; background: #000; border-radius: 15px; overflow: hidden; }
         video { width: 100%; height: 100%; object-fit: cover; }
-        .controls { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 50px; }
-        button { padding: 10px 20px; border-radius: 20px; border: none; cursor: pointer; background: var(--accent); color: white; font-weight: bold; }
-        input { padding: 15px; border-radius: 10px; border: none; width: 250px; margin-bottom: 10px; background: #1e293b; color: white; text-align: center; }
-        .hidden { display: none; }
-        #status-log { position: fixed; top: 10px; width: 100%; text-align: center; font-size: 12px; color: #60a5fa; }
+        .controls { margin-top: 20px; display: flex; gap: 10px; }
+        input { padding: 15px; border-radius: 10px; border: none; width: 200px; }
+        button { padding: 15px 25px; border-radius: 10px; border: none; cursor: pointer; background: #3b82f6; color: white; font-weight: bold; }
+        .status { position: fixed; top: 20px; color: #60a5fa; font-size: 14px; }
+        .badge { position: absolute; top: 10px; right: 10px; background: red; padding: 5px; border-radius: 5px; font-size: 10px; display: none; }
+        .active { display: block; }
     </style>
 </head>
 <body>
 
-<div id="status-log">Ready...</div>
+<div id="status" class="status">Enter Room Name to Begin</div>
 
-<div id="setup-screen" class="setup">
-    <h2>Enter Room Code</h2>
-    <input type="text" id="room-input" placeholder="e.g. MyRoom123">
-    <button onclick="joinRoom()">JOIN CALL</button>
+<div id="setup">
+    <input type="text" id="roomInput" placeholder="Room Name">
+    <button onclick="init('host')">Host</button>
+    <button onclick="init('join')" style="background: #10b981;">Join</button>
 </div>
 
-<div id="call-screen" class="hidden">
-    <div id="video-grid">
-        <div class="video-wrapper">
-            <video id="localVideo" autoplay playsinline muted></video>
+<div id="call-ui" style="display:none; width: 100%; text-align: center;">
+    <div class="grid">
+        <div class="box"><video id="local" autoplay playsinline muted></video></div>
+        <div class="box"><video id="remote" autoplay playsinline></video>
+            <div id="remote-mute" class="badge">PARTNER MUTED</div>
         </div>
     </div>
     <div class="controls">
-        <button onclick="resync()">🔄 RE-SYNC</button>
-        <button style="background:var(--danger)" onclick="location.reload()">LEAVE</button>
+        <button id="mBtn" onclick="toggle('mic')">Mic</button>
+        <button id="vBtn" onclick="toggle('vid')">Cam</button>
+        <button onclick="location.reload()" style="background:red">End</button>
     </div>
 </div>
 
 <script>
-    const log = (msg) => document.getElementById('status-log').innerText = msg;
-    let myStream, peer, roomName;
+    let peer, myStream, room;
+    const stat = (t) => document.getElementById('status').innerText = t;
 
-    async function joinRoom() {
-        roomName = document.getElementById('room-input').value.trim().toLowerCase();
-        if (!roomName) return alert("Enter a code!");
+    async function init(role) {
+        room = document.getElementById('roomInput').value.trim().toLowerCase();
+        if(!room) return alert("Enter room name");
 
-        document.getElementById('setup-screen').classList.add('hidden');
-        document.getElementById('call-screen').classList.remove('hidden');
+        document.getElementById('setup').style.display = 'none';
+        document.getElementById('call-ui').style.display = 'block';
 
-        try {
-            myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            document.getElementById('localVideo').srcObject = myStream;
-            
-            // We create a predictable ID: roomname + "1" or "2"
-            // For now, let's try a more robust random approach
-            initPeer();
-        } catch (e) {
-            alert("Camera needed!");
-        }
-    }
+        myStream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+        document.getElementById('local').srcObject = myStream;
 
-    function initPeer() {
-        // We use a STUN server to bypass Wi-Fi firewalls
-        peer = new Peer(undefined, {
-            config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] }
+        // Predictable IDs: "roomname-host" and "roomname-join"
+        const myID = room + '-' + role;
+        const targetID = room + '-' + (role === 'host' ? 'join' : 'host');
+
+        peer = new Peer(myID, {
+            config: {'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }]}
         });
 
-        peer.on('open', (id) => {
-            log("Connected. Waiting for partner...");
-            // Save our ID to a public "waiting room"
-            const signalingServer = "https://gun-manhattan.herokuapp.com/gun"; // Fallback discovery
-            broadcastPresence(id);
+        peer.on('open', () => {
+            stat("Room: " + room + " | Role: " + role.toUpperCase());
+            if(role === 'join') {
+                stat("Connecting to host...");
+                const call = peer.call(targetID, myStream);
+                handleCall(call);
+            }
         });
 
         peer.on('call', (call) => {
-            log("Partner joined! Connecting...");
+            stat("Partner connected!");
             call.answer(myStream);
             handleCall(call);
         });
-    }
 
-    // This is the "Genius" trick: We use a public list to find the other person's ID
-    function broadcastPresence(myID) {
-        const roomKey = 'adlx-' + roomName;
-        // We use a simple fetch-based discovery or the GunDB again but cleaner
-        const discovery = new Gun(['https://gun-manhattan.herokuapp.com/gun']).get(roomKey);
-        
-        discovery.set(myID);
-        
-        discovery.map().on((otherID) => {
-            if (otherID !== myID && !document.getElementById(otherID)) {
-                log("Calling partner...");
-                const call = peer.call(otherID, myStream);
-                handleCall(call);
+        peer.on('error', (e) => {
+            if(e.type === 'peer-unavailable' && role === 'join') {
+                stat("Host not found. Ask friend to click 'Host' first.");
+            } else {
+                stat("Error: " + e.type);
             }
         });
     }
 
     function handleCall(call) {
-        const video = document.createElement('video');
-        video.id = call.peer;
-        call.on('stream', (remoteStream) => {
-            if (document.getElementById(call.peer)) return;
-            const wrapper = document.createElement('div');
-            wrapper.className = 'video-wrapper';
-            video.srcObject = remoteStream;
-            video.autoplay = true;
-            video.playsInline = true;
-            wrapper.append(video);
-            document.getElementById('video-grid').append(wrapper);
-            log("Connected!");
+        call.on('stream', (s) => {
+            document.getElementById('remote').srcObject = s;
         });
     }
 
-    function resync() {
-        log("Re-syncing...");
-        location.reload();
+    function toggle(type) {
+        const track = type === 'mic' ? myStream.getAudioTracks()[0] : myStream.getVideoTracks()[0];
+        track.enabled = !track.enabled;
+        const btn = document.getElementById(type === 'mic' ? 'mBtn' : 'vBtn');
+        btn.style.background = track.enabled ? '#3b82f6' : '#ef4444';
     }
 </script>
 </body>

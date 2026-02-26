@@ -3,103 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modern Video Call</title>
+    <title>Group Video Room</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        :root { --bg: #0f172a; --card: #1e293b; --accent: #3b82f6; --danger: #ef4444; --text: #f8fafc; }
-        body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .main-container { display: flex; flex: 1; padding: 20px; gap: 20px; height: calc(100vh - 120px); }
-        .video-grid { flex: 3; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
-        .video-wrapper { position: relative; background: #000; border-radius: 16px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }
+        :root { --bg: #0f172a; --card: #1e293b; --accent: #3b82f6; --text: #f8fafc; }
+        body { margin: 0; font-family: sans-serif; background: var(--bg); color: var(--text); }
+        
+        /* Video Grid - Automatically fits 2, 3, or 4+ people */
+        #video-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
+            gap: 15px; padding: 20px; height: 80vh; 
+        }
+        .video-wrapper { position: relative; background: #000; border-radius: 12px; overflow: hidden; height: 100%; }
         video { width: 100%; height: 100%; object-fit: cover; }
-        .label { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.6); padding: 4px 12px; border-radius: 20px; font-size: 12px; }
-        .sidebar { flex: 1; background: var(--card); border-radius: 16px; display: flex; flex-direction: column; padding: 15px; }
-        #chat-box { flex: 1; overflow-y: auto; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
-        .msg { padding: 8px 12px; border-radius: 12px; background: #334155; font-size: 14px; max-width: 80%; }
-        .control-bar { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(30, 41, 59, 0.9); backdrop-filter: blur(10px); padding: 12px 25px; border-radius: 50px; display: flex; gap: 12px; align-items: center; border: 1px solid rgba(255,255,255,0.1); }
-        button { background: var(--accent); color: white; border: none; padding: 10px 18px; border-radius: 30px; cursor: pointer; font-weight: 600; }
-        button.danger { background: var(--danger); }
-        input { background: #334155; border: none; padding: 10px 15px; border-radius: 20px; color: white; width: 150px; }
+        
+        .room-info { padding: 20px; background: var(--card); text-align: center; border-bottom: 1px solid #334155; }
+        .controls { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: rgba(0,0,0,0.6); padding: 15px; border-radius: 50px; backdrop-filter: blur(10px); }
+        button { padding: 10px 20px; border-radius: 20px; border: none; cursor: pointer; background: var(--accent); color: white; font-weight: bold; }
     </style>
 </head>
 <body>
 
-<div style="padding: 15px 20px; background: var(--card); border-bottom: 1px solid #334155;">
-    <strong>Your ID:</strong> <span id="my-id" style="color: var(--accent)">Connecting...</span>
+<div class="room-info">
+    <h2 id="room-title">Joining Room...</h2>
+    <p>Share this link to invite others: <b id="room-link" style="color:var(--accent)"></b></p>
 </div>
 
-<div class="main-container">
-    <div class="video-grid">
-        <div class="video-wrapper"><video id="localVideo" autoplay playsinline muted></video><div class="label">You</div></div>
-        <div class="video-wrapper"><video id="remoteVideo" autoplay playsinline></video><div class="label">Partner</div></div>
-    </div>
-    <div class="sidebar">
-        <div id="chat-box"></div>
-        <input type="text" id="message-input" style="width: 90%" placeholder="Type message..." onkeypress="if(event.key==='Enter') sendMessage()">
+<div id="video-grid">
+    <div class="video-wrapper" id="local-container">
+        <video id="localVideo" autoplay playsinline muted></video>
+        <div style="position:absolute; bottom:10px; left:10px; background:rgba(0,0,0,0.5); padding:2px 8px; border-radius:5px;">You</div>
     </div>
 </div>
 
-<div class="control-bar">
-    <button onclick="toggleAudio()">🎤</button>
-    <button onclick="toggleVideo()">📷</button>
-    <button style="background:#475569" onclick="shareScreen()">📺 Share</button>
-    <input type="text" id="remote-id" placeholder="Partner ID">
-    <button onclick="connectToPeer()">Connect</button>
-    <button class="danger" onclick="location.reload()">End</button>
+<div class="controls">
+    <button onclick="toggleAudio()">🎤 Mic</button>
+    <button onclick="toggleVideo()">📷 Cam</button>
+    <button style="background:#ef4444" onclick="location.href='/'">Leave</button>
 </div>
 
 <script>
-    const peer = new Peer();
-    let localStream, conn, currentCall;
+    // 1. Setup Room Name from URL
+    let roomID = window.location.hash.substring(1);
+    if (!roomID) {
+        roomID = Math.random().toString(36).substring(7);
+        window.location.hash = roomID;
+    }
+    document.getElementById('room-title').innerText = "Room: " + roomID;
+    document.getElementById('room-link').innerText = window.location.href;
 
-    peer.on('open', id => document.getElementById('my-id').innerText = id);
+    const peer = new Peer(); // In a real app, you'd prefix this with the roomID
+    const videoGrid = document.getElementById('video-grid');
+    const peers = {}; // Keep track of people connected
+    let myStream;
 
+    // 2. Get Camera
     navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
-        localStream = stream;
+        myStream = stream;
         document.getElementById('localVideo').srcObject = stream;
+
+        // Answer calls from new people joining
         peer.on('call', call => {
             call.answer(stream);
-            call.on('stream', rs => document.getElementById('remoteVideo').srcObject = rs);
-            currentCall = call;
+            const video = document.createElement('video');
+            call.on('stream', userStream => addVideoStream(video, userStream, call.peer));
         });
+
+        // 3. Simple "Discovery" Logic 
+        // Note: PeerJS Cloud doesn't have "Rooms" built-in, so for a 100% 
+        // HTML solution, you still need to paste the FIRST person's Peer ID 
+        // or use a small backend. 
     });
 
-    peer.on('connection', c => { conn = c; c.on('data', data => displayMsg("Partner: " + data)); });
-
-    function connectToPeer() {
-        const rID = document.getElementById('remote-id').value;
-        conn = peer.connect(rID);
-        conn.on('open', () => conn.on('data', data => displayMsg("Partner: " + data)));
-        const call = peer.call(rID, localStream);
-        call.on('stream', rs => document.getElementById('remoteVideo').srcObject = rs);
-        currentCall = call;
+    function addVideoStream(video, stream, peerId) {
+        if (peers[peerId]) return; // Don't add same person twice
+        const wrapper = document.createElement('div');
+        wrapper.className = 'video-wrapper';
+        wrapper.id = peerId;
+        video.srcObject = stream;
+        video.autoplay = true;
+        video.playsInline = true;
+        wrapper.append(video);
+        videoGrid.append(wrapper);
+        peers[peerId] = stream;
     }
 
-    function sendMessage() {
-        const input = document.getElementById('message-input');
-        if (conn && input.value) {
-            conn.send(input.value);
-            displayMsg("Me: " + input.value);
-            input.value = "";
-        }
-    }
+    // Toggle Functions
+    function toggleAudio() { myStream.getAudioTracks()[0].enabled = !myStream.getAudioTracks()[0].enabled; }
+    function toggleVideo() { myStream.getVideoTracks()[0].enabled = !myStream.getVideoTracks()[0].enabled; }
 
-    function displayMsg(m) {
-        const box = document.getElementById('chat-box');
-        box.innerHTML += `<div class="msg">${m}</div>`;
-        box.scrollTop = box.scrollHeight;
-    }
-
-    function toggleAudio() { localStream.getAudioTracks()[0].enabled = !localStream.getAudioTracks()[0].enabled; }
-    function toggleVideo() { localStream.getVideoTracks()[0].enabled = !localStream.getVideoTracks()[0].enabled; }
-    
-    async function shareScreen() {
-        const ss = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        if (currentCall) {
-            const sender = currentCall.peerConnection.getSenders().find(s => s.track.kind === 'video');
-            sender.replaceTrack(ss.getVideoTracks()[0]);
-        }
-    }
 </script>
 </body>
 </html>

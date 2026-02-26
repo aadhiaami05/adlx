@@ -2,97 +2,147 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Group Video Room</title>
+    <title>Easy Room Video - Status Pro</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
-        :root { --bg: #0f172a; --card: #1e293b; --accent: #3b82f6; --text: #f8fafc; }
-        body { margin: 0; font-family: sans-serif; background: var(--bg); color: var(--text); }
+        :root { --bg: #0f172a; --accent: #3b82f6; --danger: #ef4444; --text: #f8fafc; }
+        body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
+        .setup { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; padding: 20px; }
         
-        /* Video Grid - Automatically fits 2, 3, or 4+ people */
-        #video-grid { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
-            gap: 15px; padding: 20px; height: 80vh; 
-        }
-        .video-wrapper { position: relative; background: #000; border-radius: 12px; overflow: hidden; height: 100%; }
+        .video-wrapper { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 16/9; border: 2px solid transparent; }
         video { width: 100%; height: 100%; object-fit: cover; }
         
-        .room-info { padding: 20px; background: var(--card); text-align: center; border-bottom: 1px solid #334155; }
-        .controls { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: rgba(0,0,0,0.6); padding: 15px; border-radius: 50px; backdrop-filter: blur(10px); }
-        button { padding: 10px 20px; border-radius: 20px; border: none; cursor: pointer; background: var(--accent); color: white; font-weight: bold; }
+        /* Indicators */
+        .status-icons { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; }
+        .badge { background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px; font-size: 12px; display: none; }
+        .badge.active { display: block; }
+        .name-tag { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+
+        .controls { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: rgba(30, 41, 59, 0.8); padding: 15px; border-radius: 50px; backdrop-filter: blur(10px); }
+        button { padding: 10px 20px; border-radius: 20px; border: none; cursor: pointer; background: var(--accent); color: white; font-weight: bold; transition: 0.2s; }
+        button.off { background: var(--danger); }
+        input { padding: 12px; border-radius: 8px; border: none; width: 220px; margin-bottom: 10px; background: #334155; color: white; }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
 
-<div class="room-info">
-    <h2 id="room-title">Joining Room...</h2>
-    <p>Share this link to invite others: <b id="room-link" style="color:var(--accent)"></b></p>
+<div id="setup-screen" class="setup">
+    <h2>Join a Room</h2>
+    <input type="text" id="room-id" placeholder="Enter Room Name">
+    <button onclick="startApp()">Join Room</button>
 </div>
 
-<div id="video-grid">
-    <div class="video-wrapper" id="local-container">
-        <video id="localVideo" autoplay playsinline muted></video>
-        <div style="position:absolute; bottom:10px; left:10px; background:rgba(0,0,0,0.5); padding:2px 8px; border-radius:5px;">You</div>
+<div id="call-screen" class="hidden">
+    <div id="video-grid">
+        <div class="video-wrapper" id="local-wrapper">
+            <video id="localVideo" autoplay playsinline muted></video>
+            <div class="name-tag">You</div>
+            <div class="status-icons">
+                <span id="local-mic-badge" class="badge" style="background:var(--danger)">Muted</span>
+                <span id="local-cam-badge" class="badge" style="background:var(--danger)">Video Off</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="mic-btn" onclick="toggleAudio()">🎤 Mic On</button>
+        <button id="cam-btn" onclick="toggleVideo()">📷 Cam On</button>
+        <button style="background:var(--danger)" onclick="location.reload()">Leave</button>
     </div>
 </div>
 
-<div class="controls">
-    <button onclick="toggleAudio()">🎤 Mic</button>
-    <button onclick="toggleVideo()">📷 Cam</button>
-    <button style="background:#ef4444" onclick="location.href='/'">Leave</button>
-</div>
-
 <script>
-    // 1. Setup Room Name from URL
-    let roomID = window.location.hash.substring(1);
-    if (!roomID) {
-        roomID = Math.random().toString(36).substring(7);
-        window.location.hash = roomID;
-    }
-    document.getElementById('room-title').innerText = "Room: " + roomID;
-    document.getElementById('room-link').innerText = window.location.href;
+    const pcConfig = { config: {'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }]}};
+    const gun = Gun(['https://gun-manhattan.herokuapp.com/gun']);
+    const peer = new Peer(undefined, pcConfig);
+    let myStream, myID, currentRoom;
 
-    const peer = new Peer(); // In a real app, you'd prefix this with the roomID
-    const videoGrid = document.getElementById('video-grid');
-    const peers = {}; // Keep track of people connected
-    let myStream;
+    async function startApp() {
+        const roomCode = document.getElementById('room-id').value;
+        if (!roomCode) return alert("Enter a room name!");
 
-    // 2. Get Camera
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
-        myStream = stream;
-        document.getElementById('localVideo').srcObject = stream;
+        document.getElementById('setup-screen').classList.add('hidden');
+        document.getElementById('call-screen').classList.remove('hidden');
 
-        // Answer calls from new people joining
-        peer.on('call', call => {
-            call.answer(stream);
-            const video = document.createElement('video');
-            call.on('stream', userStream => addVideoStream(video, userStream, call.peer));
+        myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        document.getElementById('localVideo').srcObject = myStream;
+
+        peer.on('open', (id) => {
+            myID = id;
+            currentRoom = gun.get('status-rooms').get(roomCode);
+            
+            // 1. Announce Presence
+            currentRoom.get(myID).put({ mic: true, cam: true });
+
+            // 2. Listen for others
+            currentRoom.map().on((data, peerID) => {
+                if (peerID !== myID && data) {
+                    // Update UI if user already exists, else call them
+                    if (document.getElementById(peerID)) {
+                        updateRemoteStatus(peerID, data);
+                    } else {
+                        const call = peer.call(peerID, myStream);
+                        addRemoteVideo(call);
+                    }
+                }
+            });
         });
 
-        // 3. Simple "Discovery" Logic 
-        // Note: PeerJS Cloud doesn't have "Rooms" built-in, so for a 100% 
-        // HTML solution, you still need to paste the FIRST person's Peer ID 
-        // or use a small backend. 
-    });
-
-    function addVideoStream(video, stream, peerId) {
-        if (peers[peerId]) return; // Don't add same person twice
-        const wrapper = document.createElement('div');
-        wrapper.className = 'video-wrapper';
-        wrapper.id = peerId;
-        video.srcObject = stream;
-        video.autoplay = true;
-        video.playsInline = true;
-        wrapper.append(video);
-        videoGrid.append(wrapper);
-        peers[peerId] = stream;
+        peer.on('call', call => {
+            call.answer(myStream);
+            addRemoteVideo(call);
+        });
     }
 
-    // Toggle Functions
-    function toggleAudio() { myStream.getAudioTracks()[0].enabled = !myStream.getAudioTracks()[0].enabled; }
-    function toggleVideo() { myStream.getVideoTracks()[0].enabled = !myStream.getVideoTracks()[0].enabled; }
+    function addRemoteVideo(call) {
+        if (document.getElementById(call.peer)) return;
+        const video = document.createElement('video');
+        const wrapper = document.createElement('div');
+        wrapper.className = 'video-wrapper';
+        wrapper.id = call.peer;
+        
+        wrapper.innerHTML = `
+            <div class="name-tag">Partner</div>
+            <div class="status-icons">
+                <span id="mic-${call.peer}" class="badge" style="background:var(--danger)">Muted</span>
+                <span id="cam-${call.peer}" class="badge" style="background:var(--danger)">Video Off</span>
+            </div>
+        `;
+        
+        call.on('stream', remoteStream => {
+            video.srcObject = remoteStream;
+            video.autoplay = true;
+            wrapper.prepend(video);
+            document.getElementById('video-grid').append(wrapper);
+        });
+    }
 
+    function updateRemoteStatus(peerID, data) {
+        const micB = document.getElementById(`mic-${peerID}`);
+        const camB = document.getElementById(`cam-${peerID}`);
+        if(micB) micB.classList.toggle('active', !data.mic);
+        if(camB) camB.classList.toggle('active', !data.cam);
+    }
+
+    // Toggle and Sync to Database
+    function toggleAudio() {
+        const enabled = myStream.getAudioTracks()[0].enabled = !myStream.getAudioTracks()[0].enabled;
+        document.getElementById('mic-btn').innerText = enabled ? "🎤 Mic On" : "🔇 Mic Off";
+        document.getElementById('mic-btn').classList.toggle('off', !enabled);
+        document.getElementById('local-mic-badge').classList.toggle('active', !enabled);
+        currentRoom.get(myID).patch({ mic: enabled });
+    }
+
+    function toggleVideo() {
+        const enabled = myStream.getVideoTracks()[0].enabled = !myStream.getVideoTracks()[0].enabled;
+        document.getElementById('cam-btn').innerText = enabled ? "📷 Cam On" : "🚫 Cam Off";
+        document.getElementById('cam-btn').classList.toggle('off', !enabled);
+        document.getElementById('local-cam-badge').classList.toggle('active', !enabled);
+        currentRoom.get(myID).patch({ cam: enabled });
+    }
 </script>
 </body>
 </html>

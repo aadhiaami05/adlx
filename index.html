@@ -3,20 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ADLX Master</title>
+    <title>ADLX Master Pro</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        :root { --bg: #0f172a; --accent: #3b82f6; --danger: #ef4444; }
+        :root { --bg: #0f172a; --accent: #3b82f6; --danger: #ef4444; --card: #1e293b; }
         body { margin: 0; font-family: sans-serif; background: var(--bg); color: white; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        /* Video Grid */
         .video-container { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px; flex: 1; }
-        .box { position: relative; background: #000; border-radius: 12px; overflow: hidden; }
+        .box { position: relative; background: #000; border-radius: 12px; overflow: hidden; border: 2px solid #334155; }
         video { width: 100%; height: 100%; object-fit: cover; }
-        #chat-box { height: 120px; background: #1e293b; padding: 10px; overflow-y: auto; border-top: 1px solid #334155; }
-        .msg { margin-bottom: 5px; padding: 5px 10px; border-radius: 5px; background: #334155; width: fit-content; max-width: 80%; }
+        
+        /* Indicators */
+        .status-overlay { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; pointer-events: none; }
+        .badge { background: var(--danger); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; display: none; }
+        .badge.visible { display: block; }
+        .label { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+
+        /* Chat & Controls */
+        #chat-box { height: 100px; background: var(--card); padding: 10px; overflow-y: auto; border-top: 1px solid #334155; }
+        .msg { margin-bottom: 5px; padding: 5px 10px; border-radius: 5px; background: #334155; width: fit-content; max-width: 80%; font-size: 13px; }
         .msg.me { background: var(--accent); margin-left: auto; }
-        .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; padding: 10px; background: #1e293b; }
-        button { padding: 10px; border-radius: 8px; border: none; cursor: pointer; background: var(--accent); color: white; font-size: 12px; font-weight: bold; }
-        input { padding: 10px; border-radius: 8px; border: none; background: #334155; color: white; }
+        .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 12px; background: var(--card); }
+        button { padding: 10px 14px; border-radius: 8px; border: none; cursor: pointer; background: var(--accent); color: white; font-weight: bold; font-size: 12px; }
+        button.inactive { background: var(--danger); }
+        input { padding: 10px; border-radius: 8px; border: none; background: #334155; color: white; flex: 1; }
+        
         #setup { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
         .hidden { display: none !important; }
     </style>
@@ -24,9 +36,9 @@
 <body>
 
 <div id="setup">
-    <h2>ADLX Master</h2>
-    <input type="text" id="roomInput" placeholder="Room Name">
-    <div style="margin-top:15px; display:flex; gap:10px;">
+    <h2>ADLX Master Pro</h2>
+    <input type="text" id="roomInput" placeholder="Room Name" style="flex:none; width:200px; margin-bottom:10px;">
+    <div style="display:flex; gap:10px;">
         <button onclick="init('host')">Host</button>
         <button onclick="init('join')" style="background:#10b981">Join</button>
     </div>
@@ -34,23 +46,39 @@
 
 <div id="call-ui" class="hidden" style="display:contents">
     <div class="video-container">
-        <div class="box"><video id="local" autoplay playsinline muted></video></div>
-        <div class="box"><video id="remote" autoplay playsinline></video></div>
+        <div class="box">
+            <video id="local" autoplay playsinline muted></video>
+            <div class="label">You</div>
+            <div class="status-overlay">
+                <div id="local-mic-off" class="badge">MUTED</div>
+                <div id="local-vid-off" class="badge">CAM OFF</div>
+            </div>
+        </div>
+        <div class="box">
+            <video id="remote" autoplay playsinline></video>
+            <div class="label">Partner</div>
+            <div class="status-overlay">
+                <div id="remote-mic-off" class="badge">MUTED</div>
+                <div id="remote-vid-off" class="badge">CAM OFF</div>
+            </div>
+        </div>
     </div>
+
     <div id="chat-box"></div>
+
     <div class="controls">
-        <input type="text" id="chatInput" placeholder="Message..." style="flex:1">
+        <input type="text" id="chatInput" placeholder="Message...">
         <button onclick="sendChat()">Send</button>
-        <button onclick="toggle('mic')">Mic</button>
-        <button onclick="toggle('vid')">Cam</button>
-        <button onclick="switchCamera()">Flip Cam</button>
-        <button onclick="shareScreen()" id="screenBtn" style="background:#8b5cf6">Share Screen</button>
+        <button id="micBtn" onclick="toggle('mic')">🎤 Mic</button>
+        <button id="vidBtn" onclick="toggle('vid')">📷 Cam</button>
+        <button onclick="switchCamera()">🔄 Flip</button>
+        <button onclick="shareScreen()" style="background:#8b5cf6">🖥️ Share</button>
         <button onclick="location.reload()" style="background:var(--danger)">End</button>
     </div>
 </div>
 
 <script>
-    let peer, myStream, currentCall, dataConn, useBackCam = false, isSharing = false;
+    let peer, myStream, currentCall, dataConn, useBackCam = false;
 
     async function init(role) {
         const room = document.getElementById('roomInput').value.trim().toLowerCase();
@@ -82,54 +110,68 @@
         call.on('stream', (s) => document.getElementById('remote').srcObject = s);
     }
 
-    // --- SCREEN SHARING LOGIC ---
+    // --- STATUS SYNC LOGIC ---
+    function toggle(type) {
+        const track = type === 'mic' ? myStream.getAudioTracks()[0] : myStream.getVideoTracks()[0];
+        track.enabled = !track.enabled;
+        
+        // Update Local UI
+        const btn = document.getElementById(type === 'mic' ? 'micBtn' : 'vidBtn');
+        const badge = document.getElementById(`local-${type}-off`);
+        btn.classList.toggle('inactive', !track.enabled);
+        badge.classList.toggle('visible', !track.enabled);
+
+        // Send Status to Partner
+        if(dataConn && dataConn.open) {
+            dataConn.send({ type: 'status', device: type, enabled: track.enabled });
+        }
+    }
+
+    function setupData(conn) {
+        dataConn = conn;
+        dataConn.on('data', (data) => {
+            if(data.type === 'status') {
+                const badge = document.getElementById(`remote-${data.device}-off`);
+                badge.classList.toggle('visible', !data.enabled);
+            } else {
+                addMessage(data, 'partner');
+            }
+        });
+    }
+
+    // --- SCREEN & CAMERA TOOLS ---
     async function shareScreen() {
         try {
             const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
             const videoTrack = screenStream.getVideoTracks()[0];
-            
-            replaceVideoTrack(videoTrack);
+            replaceTrack(videoTrack);
             document.getElementById('local').srcObject = screenStream;
-
-            videoTrack.onended = () => stopScreenShare(); // Handle "Stop Sharing" browser button
-            document.getElementById('screenBtn').innerText = "Stop Sharing";
-            isSharing = true;
-        } catch (e) { console.log("Screen share cancelled"); }
+            videoTrack.onended = () => {
+                replaceTrack(myStream.getVideoTracks()[0]);
+                document.getElementById('local').srcObject = myStream;
+            };
+        } catch (e) {}
     }
 
-    function stopScreenShare() {
-        const videoTrack = myStream.getVideoTracks()[0];
-        replaceVideoTrack(videoTrack);
-        document.getElementById('local').srcObject = myStream;
-        document.getElementById('screenBtn').innerText = "Share Screen";
-        isSharing = false;
-    }
-
-    function replaceVideoTrack(newTrack) {
-        if (currentCall && currentCall.peerConnection) {
-            const sender = currentCall.peerConnection.getSenders().find(s => s.track.kind === 'video');
-            sender.replaceTrack(newTrack);
-        }
-    }
-
-    // --- REMAINING TOOLS ---
     async function switchCamera() {
-        if(isSharing) stopScreenShare();
         useBackCam = !useBackCam;
         const newStream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: useBackCam ? "environment" : "user" },
             audio: true
         });
         const newTrack = newStream.getVideoTracks()[0];
-        replaceVideoTrack(newTrack);
+        replaceTrack(newTrack);
         document.getElementById('local').srcObject = newStream;
     }
 
-    function setupData(conn) {
-        dataConn = conn;
-        dataConn.on('data', (data) => addMessage(data, 'partner'));
+    function replaceTrack(newTrack) {
+        if (currentCall && currentCall.peerConnection) {
+            const sender = currentCall.peerConnection.getSenders().find(s => s.track.kind === 'video');
+            sender.replaceTrack(newTrack);
+        }
     }
 
+    // --- CHAT ---
     function sendChat() {
         const input = document.getElementById('chatInput');
         if(!input.value || !dataConn) return;
@@ -144,11 +186,6 @@
         div.innerText = msg;
         document.getElementById('chat-box').appendChild(div);
         document.getElementById('chat-box').scrollTop = document.getElementById('chat-box').scrollHeight;
-    }
-
-    function toggle(type) {
-        const track = type === 'mic' ? myStream.getAudioTracks()[0] : myStream.getVideoTracks()[0];
-        track.enabled = !track.enabled;
     }
 </script>
 </body>

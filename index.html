@@ -2,146 +2,181 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Easy Room Video - Status Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultimate Room Video</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root { --bg: #0f172a; --accent: #3b82f6; --danger: #ef4444; --text: #f8fafc; }
-        body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
-        .setup { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-        #video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; padding: 20px; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
         
-        .video-wrapper { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 16/9; border: 2px solid transparent; }
+        /* Setup Screen */
+        .setup { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; text-align: center; padding: 20px; }
+        input { padding: 15px; border-radius: 10px; border: 2px solid #334155; width: 100%; max-width: 300px; margin-bottom: 15px; background: #1e293b; color: white; font-size: 16px; }
+        
+        /* Call Screen */
+        #video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; padding: 20px; height: 70vh; }
+        .video-wrapper { position: relative; background: #000; border-radius: 15px; overflow: hidden; aspect-ratio: 16/9; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
         video { width: 100%; height: 100%; object-fit: cover; }
         
-        /* Indicators */
-        .status-icons { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; }
-        .badge { background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px; font-size: 12px; display: none; }
+        /* Badges & Status */
+        .badge { position: absolute; top: 10px; right: 10px; background: var(--danger); padding: 4px 10px; border-radius: 5px; font-size: 11px; display: none; font-weight: bold; }
         .badge.active { display: block; }
-        .name-tag { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+        .name-tag { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.6); padding: 4px 10px; border-radius: 5px; font-size: 12px; }
 
-        .controls { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: rgba(30, 41, 59, 0.8); padding: 15px; border-radius: 50px; backdrop-filter: blur(10px); }
-        button { padding: 10px 20px; border-radius: 20px; border: none; cursor: pointer; background: var(--accent); color: white; font-weight: bold; transition: 0.2s; }
+        /* Controls */
+        .controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; background: rgba(15, 23, 42, 0.9); padding: 15px 25px; border-radius: 100px; border: 1px solid #334155; backdrop-filter: blur(10px); z-index: 100; }
+        button { padding: 12px 20px; border-radius: 50px; border: none; cursor: pointer; background: var(--accent); color: white; font-weight: 600; transition: 0.3s; }
         button.off { background: var(--danger); }
-        input { padding: 12px; border-radius: 8px; border: none; width: 220px; margin-bottom: 10px; background: #334155; color: white; }
-        .hidden { display: none; }
+        
+        /* Debug Log */
+        #debug-log { position: fixed; top: 10px; left: 10px; font-size: 10px; color: #94a3b8; max-width: 200px; pointer-events: none; }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
 
+<div id="debug-log">Log: Starting...</div>
+
 <div id="setup-screen" class="setup">
-    <h2>Join a Room</h2>
-    <input type="text" id="room-id" placeholder="Enter Room Name">
-    <button onclick="startApp()">Join Room</button>
+    <h1 style="margin-bottom: 10px;">ADLX Video</h1>
+    <p style="opacity: 0.7; margin-bottom: 30px;">Enter a room name to start</p>
+    <input type="text" id="room-id" placeholder="Room Name (e.g. MyGroup1)">
+    <button onclick="startApp()" style="width: 100%; max-width: 330px; padding: 18px;">Join Room</button>
 </div>
 
 <div id="call-screen" class="hidden">
+    <div style="padding: 10px; text-align: center; background: #1e293b; font-size: 14px;">
+        Connected to: <b id="room-display"></b>
+    </div>
     <div id="video-grid">
         <div class="video-wrapper" id="local-wrapper">
             <video id="localVideo" autoplay playsinline muted></video>
-            <div class="name-tag">You</div>
+            <div class="name-tag">You (Local)</div>
             <div class="status-icons">
-                <span id="local-mic-badge" class="badge" style="background:var(--danger)">Muted</span>
-                <span id="local-cam-badge" class="badge" style="background:var(--danger)">Video Off</span>
+                <span id="local-mic-badge" class="badge">MUTED</span>
+                <span id="local-cam-badge" class="badge">CAM OFF</span>
             </div>
         </div>
     </div>
 
     <div class="controls">
-        <button id="mic-btn" onclick="toggleAudio()">🎤 Mic On</button>
-        <button id="cam-btn" onclick="toggleVideo()">📷 Cam On</button>
-        <button style="background:var(--danger)" onclick="location.reload()">Leave</button>
+        <button id="mic-btn" onclick="toggleAudio()">🎤 Mic</button>
+        <button id="cam-btn" onclick="toggleVideo()">📷 Cam</button>
+        <button style="background:var(--danger)" onclick="location.reload()">End</button>
     </div>
 </div>
 
 <script>
-    const pcConfig = { config: {'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }]}};
+    // Config for Firewall Punching (STUN)
+    const pcConfig = { config: {'iceServers': [
+        { 'urls': 'stun:stun.l.google.com:19302' },
+        { 'urls': 'stun:stun1.l.google.com:19302' }
+    ]}};
+    
+    // Signaling Database
     const gun = Gun(['https://gun-manhattan.herokuapp.com/gun']);
     const peer = new Peer(undefined, pcConfig);
+    
     let myStream, myID, currentRoom;
 
+    function log(msg) {
+        const d = document.getElementById('debug-log');
+        d.innerText = msg;
+        console.log(msg);
+    }
+
     async function startApp() {
-        const roomCode = document.getElementById('room-id').value;
-        if (!roomCode) return alert("Enter a room name!");
+        const roomCode = document.getElementById('room-id').value.trim().toLowerCase();
+        if (!roomCode) return alert("Please enter a room name");
 
         document.getElementById('setup-screen').classList.add('hidden');
         document.getElementById('call-screen').classList.remove('hidden');
+        document.getElementById('room-display').innerText = roomCode;
 
-        myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        document.getElementById('localVideo').srcObject = myStream;
+        try {
+            myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            document.getElementById('localVideo').srcObject = myStream;
+            log("Camera access granted.");
+        } catch (e) {
+            log("Camera Error: " + e.message);
+            alert("Please allow camera access!");
+        }
 
         peer.on('open', (id) => {
             myID = id;
-            currentRoom = gun.get('status-rooms').get(roomCode);
+            log("My ID: " + id);
+            currentRoom = gun.get('adlx-vfinal').get(roomCode);
             
-            // 1. Announce Presence
-            currentRoom.get(myID).put({ mic: true, cam: true });
+            // Periodically broadcast presence so late-joiners see us
+            setInterval(() => {
+                currentRoom.get(myID).put({ mic: myStream.getAudioTracks()[0].enabled, cam: myStream.getVideoTracks()[0].enabled, time: Date.now() });
+            }, 3000);
 
-            // 2. Listen for others
+            // Listen for others in the room
             currentRoom.map().on((data, peerID) => {
                 if (peerID !== myID && data) {
-                    // Update UI if user already exists, else call them
-                    if (document.getElementById(peerID)) {
-                        updateRemoteStatus(peerID, data);
-                    } else {
+                    if (!document.getElementById(peerID)) {
+                        log("New user detected! Calling...");
                         const call = peer.call(peerID, myStream);
                         addRemoteVideo(call);
+                    } else {
+                        updateRemoteStatus(peerID, data);
                     }
                 }
             });
         });
 
         peer.on('call', call => {
+            log("Receiving call...");
             call.answer(myStream);
             addRemoteVideo(call);
         });
+
+        peer.on('error', err => log("PeerJS Error: " + err.type));
     }
 
     function addRemoteVideo(call) {
         if (document.getElementById(call.peer)) return;
-        const video = document.createElement('video');
+        
         const wrapper = document.createElement('div');
         wrapper.className = 'video-wrapper';
         wrapper.id = call.peer;
-        
         wrapper.innerHTML = `
-            <div class="name-tag">Partner</div>
+            <video autoplay playsinline></video>
+            <div class="name-tag">Participant</div>
             <div class="status-icons">
-                <span id="mic-${call.peer}" class="badge" style="background:var(--danger)">Muted</span>
-                <span id="cam-${call.peer}" class="badge" style="background:var(--danger)">Video Off</span>
+                <span id="mic-${call.peer}" class="badge">MUTED</span>
+                <span id="cam-${call.peer}" class="badge">CAM OFF</span>
             </div>
         `;
-        
+
         call.on('stream', remoteStream => {
-            video.srcObject = remoteStream;
-            video.autoplay = true;
-            wrapper.prepend(video);
+            log("Stream received!");
+            wrapper.querySelector('video').srcObject = remoteStream;
             document.getElementById('video-grid').append(wrapper);
         });
+        
+        call.on('close', () => wrapper.remove());
     }
 
     function updateRemoteStatus(peerID, data) {
-        const micB = document.getElementById(`mic-${peerID}`);
-        const camB = document.getElementById(`cam-${peerID}`);
-        if(micB) micB.classList.toggle('active', !data.mic);
-        if(camB) camB.classList.toggle('active', !data.cam);
+        const m = document.getElementById(`mic-${peerID}`);
+        const c = document.getElementById(`cam-${peerID}`);
+        if(m) m.classList.toggle('active', data.mic === false);
+        if(c) c.classList.toggle('active', data.cam === false);
     }
 
-    // Toggle and Sync to Database
     function toggleAudio() {
         const enabled = myStream.getAudioTracks()[0].enabled = !myStream.getAudioTracks()[0].enabled;
-        document.getElementById('mic-btn').innerText = enabled ? "🎤 Mic On" : "🔇 Mic Off";
         document.getElementById('mic-btn').classList.toggle('off', !enabled);
         document.getElementById('local-mic-badge').classList.toggle('active', !enabled);
-        currentRoom.get(myID).patch({ mic: enabled });
     }
 
     function toggleVideo() {
         const enabled = myStream.getVideoTracks()[0].enabled = !myStream.getVideoTracks()[0].enabled;
-        document.getElementById('cam-btn').innerText = enabled ? "📷 Cam On" : "🚫 Cam Off";
         document.getElementById('cam-btn').classList.toggle('off', !enabled);
         document.getElementById('local-cam-badge').classList.toggle('active', !enabled);
-        currentRoom.get(myID).patch({ cam: enabled });
     }
 </script>
 </body>
